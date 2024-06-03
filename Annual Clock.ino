@@ -1,15 +1,3 @@
-/*
-Equipment used in this setup
-
-Board - ESP-WROOM-32 by AITRIP (DOIT ESP32 DEVKIT V1 in Arduino IDE)
-Board Manager URL: https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
-Stepper Motor - 28BYJ-48 DC 5V Stepper Motor
-Setter Driver - ULN2003 Drive Board
-Photo Interrupter - DAOKI https://www.amazon.com/dp/B081W4KMHC?psc=1&ref=product_details
-*/
-
-
-
 //Standard Libraries
 #include <WiFi.h>
 #include <NTPClient.h>
@@ -20,10 +8,11 @@ Photo Interrupter - DAOKI https://www.amazon.com/dp/B081W4KMHC?psc=1&ref=product
 //Custom Libraries
 #include "wifi_credentials.h"
 
-
 // ---------------- CONSTANTS AND GLOBAL VARIABLES----------------------
 
 // WiFi and NTP settings.  IP addresses were added in case of DNS failure.  These should be updated periodically.
+const char* zeroPointDateTime = "2024-12-21T00:00:00"; // Zero-point date/time in ISO format. 
+
 const char* ntpServers[] = {
   "time.google.com",
   "time.nist.gov",
@@ -61,33 +50,27 @@ const int sensorPin = 34;
 const int builtInBlueLedPin = 2;
 const int minStepCount = 2; // Minimum number of steps required to move the stepper.  
 
-
 // Motor settings
 const int MotorInterfaceType = 8;
 const int stepsPerRevolution = 4098;  //Set your steps per revolution here
 const int hoursInYear = 8760;  //This is an average based on 365.25 days a year so that leap year is blended.
 const float stepsPerHour = (float)stepsPerRevolution / hoursInYear;
-const int homingSpeed = -1000;         // Speed for homing the motor.  This is running counterclockwise to visually differentiate between homing and time setting movements.
+const int homingSpeed = -1000;         // Speed for homing the motor. 
 const int maxMotorSpeed = 1000;        // Maximum speed for the motor
 const int motorAcceleration = 500;     // Acceleration for the motor
 
 // Timing settings
 const int sensorThreshold = 0;  //This will depend on the photo interrupter module used
-const double intervalHours = 6;  //How often would you like for the hand to update the time?  For reference, each day represents ~1 degree.
+const double intervalHours = 6;  //How often would you like for the hand to update the time?
 const int rehomeInterval = 10; //After how many hand updates (controlled by intervalHours) would you like for it to get new NTP time, re-home the stepper, and move arm to date?
 const uint64_t intervalMS = (uint64_t)(intervalHours * 60 * 60 * 1000); // intervalHours Conversion to milliseconds
 const uint64_t intervalUS = intervalMS * 1000; // intervalHours Conversion to microseconds for sleep function
-
-const char* zeroPointDateTime = "2023-07-01T00:00:00"; // Zero-point date/time in ISO format.  This should be where in the year the sensor is.  If you want Jan 1 to be at the top, set this to July 1.  If you want the middle of winter solstice to be at the bottom, set this value to Dec 20 for example.
-
 
 // Realtime Clock Variables
 RTC_DATA_ATTR unsigned long previousMillis = 0;  //Used for interval update loop
 RTC_DATA_ATTR int updateCount = 0; 
 RTC_DATA_ATTR time_t lastUpdateTime = 0; // Store last update time
 RTC_DATA_ATTR int lastStepperPosition = 0;  // Store last position of the stepper motor before sleep
-
-
 
 // NTP Server settings
 WiFiUDP ntpUDP;
@@ -97,9 +80,8 @@ NTPClient timeClient(ntpUDP, ntpServers[0], 0, 60000);
 AccelStepper stepper = AccelStepper(MotorInterfaceType, motorPin1, motorPin3, motorPin2, motorPin4);
 
 // Function declarations
-void connectToWiFi();
-void disconnectWiFi();
-void updateTime();
+bool connectToWiFi();
+bool updateTime();
 void homeMotor();
 int calculateStepPosition(const char* homeDate, String targetDate);
 void moveToPosition(int targetPosition);
@@ -110,8 +92,6 @@ void testMoveSteps(int steps);
 void testMoveToPosition(int position);
 void testGoToDateTime(String date);
 void testHome();
-
-
 
 // ---------------- SETUP----------------------
 void setup() {
@@ -127,6 +107,18 @@ void setup() {
   stepper.setMaxSpeed(maxMotorSpeed);
   stepper.setAcceleration(motorAcceleration);
 
+  // Attempt to connect to WiFi
+  if (!connectToWiFi()) {
+    Serial.println("WiFi connection failed. Exiting...");
+    return;
+  }
+
+  // Attempt to update NTP time
+  if (!updateTime()) {
+    Serial.println("Failed to get NTP time. Exiting...");
+    return;
+  }
+
   // Set the current position to the last saved position before sleep
   stepper.setCurrentPosition(lastStepperPosition);
 
@@ -134,7 +126,6 @@ void setup() {
   if (updateCount == 0 || updateCount == rehomeInterval) {
     // Initial homing or re-homing
     homeMotor();
-    updateTime();
     updatePosition();
     updateCount = (updateCount == rehomeInterval) ? 1 : updateCount + 1;
   } else {
@@ -172,24 +163,21 @@ void setup() {
   esp_deep_sleep_start();
 }
 
-
-
 // ---------------- LOOP----------------------
 void loop() {
   // The loop will be empty because the main work is handled in the setup function before going to deep sleep
 }
 
-
 // ---------------- CUSTOM FUNCTIONS----------------------
 
 // Function to connect to WiFi
-void connectToWiFi() {
+bool connectToWiFi() {
   Serial.println("Attempting to connect to WiFi (" + String(ssid) + ")");
   WiFi.begin(ssid, password);
 
   unsigned long startAttemptTime = millis();
 
-  // Attempt to connect for 10 seconds
+  // Attempt to connect for 30 seconds
   while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < 30000) {
     delay(wifiConnectionDelay);
   }
@@ -198,28 +186,15 @@ void connectToWiFi() {
     Serial.println("Connected to WiFi.");
     Serial.print("IP Address: ");
     Serial.println(WiFi.localIP());
+    return true;
   } else {
     Serial.println("Failed to connect to WiFi (" + String(ssid) + ")");
+    return false;
   }
 }
 
-// Function to disconnect from WiFi
-void disconnectWiFi() {
-  WiFi.disconnect(true);
-  WiFi.mode(WIFI_OFF);
-  Serial.println("WiFi disconnected");
-}
-
-// Function to convert epoch time to ISO 8601 format
-String epochToISO(time_t epochTime) {
-  struct tm * timeInfo = localtime(&epochTime);
-  char buffer[25];
-  strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%S", timeInfo);
-  return String(buffer);
-}
-
 // Function to update NTP time
-void updateTime() {
+bool updateTime() {
   connectToWiFi();
   delay(ntpUpdateDelay);
   bool timeUpdated = false;
@@ -242,19 +217,32 @@ void updateTime() {
     }
   }
 
-
-
   if (timeUpdated) {
     lastUpdateTime = timeClient.getEpochTime();
     Serial.println("Updated lastUpdateTime with NTP: " + epochToISO(lastUpdateTime));
+    disconnectWiFi();
+    return true;
   } else {
     Serial.println("Failed to update time with all servers.");
+    disconnectWiFi();
+    return false;
   }
-
-  disconnectWiFi();
 }
 
+// Function to disconnect from WiFi
+void disconnectWiFi() {
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  Serial.println("WiFi disconnected");
+}
 
+// Function to convert epoch time to ISO 8601 format
+String epochToISO(time_t epochTime) {
+  struct tm * timeInfo = localtime(&epochTime);
+  char buffer[25];
+  strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%S", timeInfo);
+  return String(buffer);
+}
 
 // Function to home the motor
 void homeMotor() {
@@ -395,7 +383,6 @@ void moveToPosition(int targetPosition) {
   lastStepperPosition = stepper.currentPosition(); // Update lastStepperPosition after movement
 }
 
-
 // Function to update the position
 void updatePosition() {
   int targetPosition = calculateStepPosition(zeroPointDateTime, getCurrentTime().c_str());
@@ -432,7 +419,6 @@ String getCurrentTime() {
   return String(buffer);
 }
 
-
 // Test functions
 void testMoveSteps(int steps) {
   stepper.enableOutputs();
@@ -453,4 +439,3 @@ void testGoToDateTime(String date) {
 void testHome() {
   homeMotor();
 }
-
