@@ -42,10 +42,10 @@ const int wifiConnectionDelay = 1000;  // Delay for WiFi connection attempts in 
 const int ntpUpdateDelay = 2000;       // Delay for NTP update attempts in milliseconds
 
 // Motor and Sensor Pins
-const int motorPin1 = 18;
-const int motorPin2 = 19;
-const int motorPin3 = 12;
-const int motorPin4 = 13;
+const int motorPin1 = 13;
+const int motorPin2 = 12;
+const int motorPin3 = 14;
+const int motorPin4 = 27;
 const int sensorPin = 34;
 const int builtInBlueLedPin = 2;
 const int minStepCount = 2; // Minimum number of steps required to move the stepper.  
