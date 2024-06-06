@@ -61,7 +61,7 @@ const int motorAcceleration = 500;     // Acceleration for the motor
 
 // Timing settings
 const int sensorThreshold = 0;  //This will depend on the photo interrupter module used
-const double intervalHours = 6;  //How often would you like for the hand to update the time?
+const double intervalHours = 6;  //How often would you like for the hand to update the time? Degault of 6 hours will have ~0.25 degree movement per update.
 const int rehomeInterval = 10; //After how many hand updates (controlled by intervalHours) would you like for it to get new NTP time, re-home the stepper, and move arm to date?
 const uint64_t intervalMS = (uint64_t)(intervalHours * 60 * 60 * 1000); // intervalHours Conversion to milliseconds
 const uint64_t intervalUS = intervalMS * 1000; // intervalHours Conversion to microseconds for sleep function
@@ -107,32 +107,42 @@ void setup() {
   stepper.setMaxSpeed(maxMotorSpeed);
   stepper.setAcceleration(motorAcceleration);
 
-  // Attempt to connect to WiFi
-  if (!connectToWiFi()) {
-    Serial.println("WiFi connection failed. Exiting...");
-    return;
-  }
 
-  // Attempt to update NTP time
-  if (!updateTime()) {
-    Serial.println("Failed to get NTP time. Exiting...");
-    return;
-  }
 
   // Set the current position to the last saved position before sleep
   stepper.setCurrentPosition(lastStepperPosition);
 
   // Check the update count to see what actions need to take place.
   if (updateCount == 0 || updateCount == rehomeInterval) {
+
+    Serial.println("--FULL HOMING SEQUENCE--");
+
+    // Attempt to connect to WiFi
+    if (!connectToWiFi()) {
+      Serial.println("WiFi connection failed. Exiting...");
+      return;
+    }
+
+    // Attempt to update NTP time
+    if (!updateTime()) {
+      Serial.println("Failed to get NTP time. Exiting...");
+      return;
+    }
+
     // Initial homing or re-homing
+    
     homeMotor();
     updatePosition();
     updateCount = (updateCount == rehomeInterval) ? 1 : updateCount + 1;
+
   } else {
+
+    Serial.println("--UPDATE SEQUENCE--");
     lastUpdateTime += intervalHours * 3600;
     Serial.println("Updated lastUpdateTime with maths: " + epochToISO(lastUpdateTime));
     updatePosition();
     updateCount++;
+
   }
 
   lastStepperPosition = stepper.currentPosition();
@@ -158,7 +168,7 @@ void setup() {
   Serial.print(intervalHours);
   Serial.println(" hours)");
 
-  // Enter deep sleep for the interval duration
+  // Enter deep sleep for the interval duration.  Comment out these lines if you'd like to use the test commands.
   esp_sleep_enable_timer_wakeup(intervalUS);
   esp_deep_sleep_start();
 }
@@ -166,6 +176,11 @@ void setup() {
 // ---------------- LOOP----------------------
 void loop() {
   // The loop will be empty because the main work is handled in the setup function before going to deep sleep
+
+  //These commands are for testing functionality.  You need to uncomment the below and then comment out the lines related to the sleep commands in the setup for these to work.
+
+  //checkSerialCommands();
+
 }
 
 // ---------------- CUSTOM FUNCTIONS----------------------
