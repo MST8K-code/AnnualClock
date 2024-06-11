@@ -12,6 +12,9 @@
 
 // WiFi and NTP settings.  IP addresses were added in case of DNS failure.  These should be updated periodically.
 const char* zeroPointDateTime = "2024-12-21T00:00:00"; // Zero-point date/time in ISO format. 
+const double intervalHours = 6;  //How often would you like for the hand to update the time? Default of 6 hours will have ~0.25 degree movement per update.
+const int rehomeInterval = 10; //After how many position updates (controlled by intervalHours) would you like for it to get new NTP time, re-home the stepper, and move arm to date?
+
 
 const char* ntpServers[] = {
   "time.google.com",
@@ -61,8 +64,6 @@ const int motorAcceleration = 500;     // Acceleration for the motor
 
 // Timing settings
 const int sensorThreshold = 0;  //This will depend on the photo interrupter module used
-const double intervalHours = 6;  //How often would you like for the hand to update the time? Degault of 6 hours will have ~0.25 degree movement per update.
-const int rehomeInterval = 10; //After how many hand updates (controlled by intervalHours) would you like for it to get new NTP time, re-home the stepper, and move arm to date?
 const uint64_t intervalMS = (uint64_t)(intervalHours * 60 * 60 * 1000); // intervalHours Conversion to milliseconds
 const uint64_t intervalUS = intervalMS * 1000; // intervalHours Conversion to microseconds for sleep function
 
@@ -93,8 +94,12 @@ void testMoveToPosition(int position);
 void testGoToDateTime(String date);
 void testHome();
 
+
+
 // ---------------- SETUP----------------------
 void setup() {
+
+
   Serial.begin(115200); // Initialize serial communication
 
   Serial.println("A person with one watch knows what time it is--a person with two watches is never sure.");
@@ -118,21 +123,30 @@ void setup() {
     Serial.println("--FULL HOMING SEQUENCE--");
 
     // Attempt to connect to WiFi
-    if (!connectToWiFi()) {
-      Serial.println("WiFi connection failed. Exiting...");
-      return;
-    }
-
-    // Attempt to update NTP time
-    if (!updateTime()) {
-      Serial.println("Failed to get NTP time. Exiting...");
-      return;
-    }
-
-    // Initial homing or re-homing
+    bool wifiConnected = connectToWiFi();
     
-    homeMotor();
-    updatePosition();
+    // Attempt to update NTP time if WiFi connected
+    bool timeUpdated = wifiConnected ? updateTime() : false;
+
+    if (timeUpdated) {
+
+      homeMotor();
+      updatePosition();
+
+    } else {
+
+      Serial.println("Using current position and millis for updates due to WiFi/NTP failure.");
+      if (updateCount == 0) {
+        // Initialize lastUpdateTime based on the current date/time if it's the initial setup
+        stepper.setCurrentPosition(stepsPerRevolution);  //Set to the last step since the motor will move counter-clockwise (count down from the max number of steps)
+        struct tm tm;
+        strptime(zeroPointDateTime, "%Y-%m-%dT%H:%M:%S", &tm);
+        lastUpdateTime = mktime(&tm);
+      }
+
+    }
+
+    
     updateCount = (updateCount == rehomeInterval) ? 1 : updateCount + 1;
 
   } else {
@@ -208,7 +222,7 @@ bool connectToWiFi() {
   }
 }
 
-// Function to update NTP time
+// Function to update time
 bool updateTime() {
   connectToWiFi();
   delay(ntpUpdateDelay);
@@ -238,11 +252,13 @@ bool updateTime() {
     disconnectWiFi();
     return true;
   } else {
-    Serial.println("Failed to update time with all servers.");
+    Serial.println("Failed to update time with all servers. Using millis() as fallback.");
+    lastUpdateTime = millis() / 1000;  // Use millis as fallback for last update time
     disconnectWiFi();
     return false;
   }
 }
+
 
 // Function to disconnect from WiFi
 void disconnectWiFi() {
@@ -310,7 +326,10 @@ void homeMotor() {
 
   digitalWrite(builtInBlueLedPin, LOW);
   stepper.disableOutputs();
+
+  lastStepperPosition = stepper.currentPosition(); // Update lastStepperPosition only after successful homing
 }
+
 
 // Function to calculate the stepper position based on two dates
 int calculateStepPosition(const char* homeDate, String targetDate) {
@@ -400,9 +419,15 @@ void moveToPosition(int targetPosition) {
 
 // Function to update the position
 void updatePosition() {
-  int targetPosition = calculateStepPosition(zeroPointDateTime, getCurrentTime().c_str());
+  int targetPosition;
+  if (WiFi.status() != WL_CONNECTED) {
+    targetPosition = calculateStepPosition(zeroPointDateTime, epochToISO(lastUpdateTime));
+  } else {
+    targetPosition = calculateStepPosition(zeroPointDateTime, getCurrentTime().c_str());
+  }
   moveToPosition(targetPosition);
 }
+
 
 // Function to check for serial commands
 void checkSerialCommands() {
